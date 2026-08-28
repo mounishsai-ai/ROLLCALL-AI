@@ -1,0 +1,31 @@
+# Secrets and local environment
+backend/serviceAccountKey.json
+backend/.env
+*.env
+
+# Personal data and ML artifacts
+backend/known_faces/
+backend/pretrained/*.ckpt
+backend/*.pkl
+backend/temp_group_photo*.jpg
+
+# Python artifacts
+backend/**/__pycache__/
+backend/**/*.pyc*
+backend/**/*.pyo
+backend/**/*.pyd
+
+# Flutter artifacts
+frontend/build/
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+
+# Logs and local caches
+*.log
+backend/pretrained/.cache/
+.claude/scheduled_tasks.lock

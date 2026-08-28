@@ -1,0 +1,22 @@
+fastapi==0.110.0
+uvicorn==0.29.0
+python-multipart==0.0.9
+firebase-admin>=6.5.0
+deepface==0.0.93
+opencv-python==4.9.0.80
+tf-keras
+numpy
+faiss-cpu
+pydantic==2.6.4
+python-dotenv==1.0.1
+# AdaFace dependencies
+torch
+torchvision
+pytorch_lightning
+huggingface_hub
+
+# VLM dependencies.
+# google-genai is the current SDK and talks to both Vertex AI (Google Cloud
+# project, real quota) and AI Studio (API key). google-generativeai is the
+# retired predecessor and is no longer imported by this project.
+google-genai

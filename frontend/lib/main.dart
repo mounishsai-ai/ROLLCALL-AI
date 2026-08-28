@@ -1,0 +1,230 @@
+import 'package:flutter/material.dart';
+import 'package:camera/camera.dart';
+import 'screens/camera_screen.dart';
+import 'screens/splash_screen.dart';
+import 'screens/manage_students_screen.dart';
+import 'theme/examination.dart';
+
+import 'services/api_service.dart';
+
+List<CameraDescription> cameras = [];
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    cameras = await availableCameras();
+  } catch (e) {
+    debugPrint('Error initializing cameras: $e');
+  }
+  await ApiService.init(); // Load custom URL if any
+  runApp(const AttendanceApp());
+}
+
+class AttendanceApp extends StatelessWidget {
+  const AttendanceApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Smart Attendance',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: Ex.ink,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Ex.safelight,
+          brightness: Brightness.dark,
+          surface: Ex.ink,
+        ),
+        useMaterial3: true,
+      ),
+      home: const SplashScreen(),
+    );
+  }
+}
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Ex.ink,
+      body: Ex.backdrop(
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
+            children: [
+              Row(
+                children: [
+                  Text('SMART ATTENDANCE',
+                      style: Ex.data.copyWith(fontSize: 10, letterSpacing: 2.4)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.tune_rounded, size: 20),
+                    color: Ex.mute,
+                    onPressed: () => _showServerSettings(context),
+                    tooltip: 'Server address',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 34),
+              Center(
+                child: Ex.disc(
+                  size: 96,
+                  glow: Ex.safelight,
+                  glowStrength: 0.7,
+                  child: const Icon(Icons.face_retouching_natural_rounded,
+                      color: Ex.bone, size: 40),
+                ),
+              ),
+              const SizedBox(height: 32),
+              Text(
+                'One photograph.\nEvery face accounted for.',
+                style: Ex.display,
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Faces the system cannot place are investigated one at a time, '
+                'and it shows its working.',
+                style: Ex.reasonQuiet,
+              ),
+              const SizedBox(height: 32),
+              _Action(
+                label: 'Mark attendance',
+                blurb: 'Photograph the room, then watch the faces get worked through.',
+                icon: Icons.camera_alt_rounded,
+                accent: Ex.safelight,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CameraScreen()),
+                ),
+              ),
+              const SizedBox(height: 14),
+              _Action(
+                label: 'Manage students',
+                blurb: 'Add or remove the people on the roster.',
+                icon: Icons.people_alt_rounded,
+                accent: Ex.settled,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ManageStudentsScreen()),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showServerSettings(BuildContext context) async {
+    final controller = TextEditingController(text: ApiService.baseUrl);
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF10314A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: Ex.rule),
+        ),
+        title: Text('SERVER ADDRESS', style: Ex.dataStrong.copyWith(letterSpacing: 1.8)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Where the backend is running. The phone and the laptop must be on the same network.',
+              style: Ex.reasonQuiet.copyWith(fontSize: 13),
+            ),
+            const SizedBox(height: 18),
+            TextField(
+              controller: controller,
+              style: Ex.reason.copyWith(fontSize: 14),
+              decoration: Ex.field('Backend URL'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('CANCEL', style: Ex.data.copyWith(fontSize: 11)),
+          ),
+          FilledButton(
+            style: Ex.primaryButton,
+            onPressed: () async {
+              if (controller.text.isNotEmpty) {
+                await ApiService.setBaseUrl(controller.text);
+              }
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: Text('SAVE',
+                style: Ex.dataStrong.copyWith(
+                    color: const Color(0xFF3A2408), letterSpacing: 1.4)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The two things this app does.
+///
+/// Each carries a glowing disc — the same shape the scan screen puts a face
+/// inside — so the app reads as one object rather than a menu bolted onto a
+/// feature.
+class _Action extends StatelessWidget {
+  final String label;
+  final String blurb;
+  final IconData icon;
+  final Color accent;
+  final VoidCallback onTap;
+
+  const _Action({
+    required this.label,
+    required this.blurb,
+    required this.icon,
+    required this.accent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Ex.glass(
+      radius: 20,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 16, 18),
+            child: Row(
+              children: [
+                Ex.disc(
+                  size: 52,
+                  glow: accent,
+                  glowStrength: 0.45,
+                  child: Icon(icon, color: accent, size: 22),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label, style: Ex.verdict.copyWith(fontSize: 17)),
+                      const SizedBox(height: 5),
+                      Text(blurb, style: Ex.reasonQuiet.copyWith(fontSize: 13.5)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Icon(Icons.chevron_right_rounded, size: 22, color: Ex.faint),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

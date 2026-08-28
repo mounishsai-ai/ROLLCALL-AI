@@ -1,0 +1,11 @@
+.env
+.env.example
+serviceAccountKey.json
+known_faces/
+pretrained/*.ckpt
+pretrained/.cache/
+__pycache__/
+*.pyc
+*.log
+venv/
+.venv/
