@@ -51,7 +51,7 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString().replaceFirst('Exception: ', '');
+        _error = ApiService.friendlyError(e);
         _isLoading = false;
       });
     }
@@ -317,7 +317,7 @@ class _StudentRow extends StatelessWidget {
               glowStrength: 0.35,
               filled: false,
               child: Image.network(
-                '${ApiService.baseUrl}/faces/$regNumber.jpg',
+                ApiService.faceImageUrl(regNumber),
                 fit: BoxFit.cover,
                 errorBuilder: (_, _, _) => Center(
                   child: Text(

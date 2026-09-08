@@ -1,11 +1,11 @@
 {
-    "name": "frontend",
-    "short_name": "frontend",
+    "name": "RollCall-AI",
+    "short_name": "RollCall-AI",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Classroom attendance from one group photo, with the system's reasoning shown.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

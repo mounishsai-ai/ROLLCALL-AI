@@ -131,12 +131,17 @@ void main() {
 
       expect(find.text('PAWAN KALYAN'), findsOneWidget);
       expect(find.text('RAM CHARAN'), findsOneWidget);
-      expect(find.text('Present'), findsOneWidget);
-      expect(find.text('Absent'), findsOneWidget);
+      // Sections say HOW each verdict was reached, not just what it was: a
+      // teacher signing this off is entitled to know which names the maths
+      // settled and which ones needed a closer look.
+      expect(find.text('MATCHED INSTANTLY'), findsOneWidget);
+      expect(find.text('THE SYSTEM WORKED THESE OUT'), findsOneWidget);
+      expect(find.text('NOT FOUND IN THE PHOTO'), findsOneWidget);
       // A face belonging to nobody enrolled must be reported, not dropped.
-      expect(find.text('Not on the roster'), findsOneWidget);
-      expect(find.text('CORRECTION'), findsOneWidget);
-      expect(find.text('SECOND OPINION'), findsOneWidget);
+      expect(find.text('NOT ON THE ROSTER'), findsOneWidget);
+      expect(find.text('CORRECTED THE FIRST GUESS'), findsOneWidget);
+      // The reasoning travels with the name.
+      expect(find.textContaining('beard shape'), findsOneWidget);
     });
 
     testWidgets('survives a result with nothing in it', (tester) async {

@@ -116,13 +116,9 @@ class _ScanScreenState extends State<ScanScreen> {
     });
   }
 
-  String _friendly(Object e) {
-    final text = e.toString();
-    if (text.contains('SocketException') || text.contains('Connection')) {
-      return 'Could not reach the server. Check that the backend is running and that the address in Settings is right.';
-    }
-    return text.replaceFirst('Exception: ', '');
-  }
+  // One shared translation of failures, so the scan screen and the roster
+  // never disagree about what the same error means.
+  String _friendly(Object e) => ApiService.friendlyError(e);
 
   String get _elapsed {
     final ms = _clock.elapsedMilliseconds;

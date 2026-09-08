@@ -43,9 +43,14 @@ class AttendanceApp extends StatelessWidget {
   }
 }
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -68,6 +73,13 @@ class HomeScreen extends StatelessWidget {
                   ),
                 ],
               ),
+              // Directly under the header, not further down: somebody opening
+              // a shared link has no way to guess a key is needed, and the
+              // alternative is their first tap failing with a bare 401.
+              if (!ApiService.hasApiKey) ...[
+                const SizedBox(height: 18),
+                _NeedsKeyNotice(onOpenSettings: () => _showServerSettings(context)),
+              ],
               const SizedBox(height: 34),
               Center(
                 child: Ex.disc(
@@ -120,6 +132,7 @@ class HomeScreen extends StatelessWidget {
 
   Future<void> _showServerSettings(BuildContext context) async {
     final controller = TextEditingController(text: ApiService.baseUrl);
+    final keyController = TextEditingController(text: ApiService.apiKey);
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -128,13 +141,14 @@ class HomeScreen extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           side: BorderSide(color: Ex.rule),
         ),
-        title: Text('SERVER ADDRESS', style: Ex.dataStrong.copyWith(letterSpacing: 1.8)),
+        title: Text('SERVER', style: Ex.dataStrong.copyWith(letterSpacing: 1.8)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Where the backend is running. The phone and the laptop must be on the same network.',
+              'Where the backend is running. On a laptop, the phone and the laptop '
+              'must be on the same network; a deployed backend works from anywhere.',
               style: Ex.reasonQuiet.copyWith(fontSize: 13),
             ),
             const SizedBox(height: 18),
@@ -142,6 +156,21 @@ class HomeScreen extends StatelessWidget {
               controller: controller,
               style: Ex.reason.copyWith(fontSize: 14),
               decoration: Ex.field('Backend URL'),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'The access key the backend expects. Leave it empty only when running '
+              'a local backend that has none set.',
+              style: Ex.reasonQuiet.copyWith(fontSize: 13),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: keyController,
+              style: Ex.reason.copyWith(fontSize: 14),
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: Ex.field('Access key'),
             ),
           ],
         ),
@@ -156,7 +185,13 @@ class HomeScreen extends StatelessWidget {
               if (controller.text.isNotEmpty) {
                 await ApiService.setBaseUrl(controller.text);
               }
+              // Saved even when blank, so the key can be cleared for a local
+              // backend that does not ask for one.
+              await ApiService.setApiKey(keyController.text);
               if (ctx.mounted) Navigator.pop(ctx);
+              // The home screen shows a notice while no key is set; it has to
+              // be told the key just arrived.
+              if (mounted) setState(() {});
             },
             child: Text('SAVE',
                 style: Ex.dataStrong.copyWith(
@@ -173,6 +208,55 @@ class HomeScreen extends StatelessWidget {
 /// Each carries a glowing disc — the same shape the scan screen puts a face
 /// inside — so the app reads as one object rather than a menu bolted onto a
 /// feature.
+/// Shown on the home screen while no access key is set.
+///
+/// Amber, not red: nothing is broken, something is simply not configured yet.
+/// Red is reserved for a face that belongs to nobody on the roster.
+class _NeedsKeyNotice extends StatelessWidget {
+  final VoidCallback onOpenSettings;
+  const _NeedsKeyNotice({required this.onOpenSettings});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onOpenSettings,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+        decoration: BoxDecoration(
+          color: Ex.safelight.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Ex.safelight.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.key_rounded, size: 18, color: Ex.safelight),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('ACCESS KEY NEEDED',
+                      style: Ex.data.copyWith(
+                          fontSize: 10, letterSpacing: 1.8, color: Ex.safelight)),
+                  const SizedBox(height: 6),
+                  Text(
+                    'This server is protected. Add the key in Settings before '
+                    'marking attendance or opening the roster.',
+                    style: Ex.reasonQuiet.copyWith(fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, size: 20, color: Ex.safelight),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _Action extends StatelessWidget {
   final String label;
   final String blurb;
