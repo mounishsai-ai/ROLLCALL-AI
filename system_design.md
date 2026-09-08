@@ -1,6 +1,6 @@
 # Smart AI Attendance System — Architecture and System Design
 
-The project is a Flutter client connected to a Python FastAPI backend. The backend communicates with Firebase Firestore for student metadata and attendance records, while face detection and recognition run locally using RetinaFace plus a selectable ArcFace or AdaFace backend. Faces the local model is not confident about are escalated to a Google Gemini vision model for a second opinion (see [VLM adjudication tier](#vlm-adjudication-tier)).
+The project is a Flutter client connected to a Python FastAPI backend. Firestore holds student metadata, attendance records **and the face vectors themselves**; FAISS is a search structure rebuilt in memory at startup, never a file on disk. Face detection and recognition run inside the backend process using RetinaFace plus a selectable ArcFace or AdaFace backend. Every request carries a shared access key. Faces the local model is not confident about are escalated to a Google Gemini vision model for a second opinion (see [VLM adjudication tier](#vlm-adjudication-tier)).
 
 The important operational rule is:
 
@@ -15,8 +15,10 @@ Both indexes can exist on disk at the same time, but changing `FACE_RECOGNITION_
 ```mermaid
 flowchart LR
     A[Flutter App] --> B[ApiService HTTP Client]
-    B --> C[FastAPI Backend]
-    C --> D[Firebase Firestore]
+    B -->|X-API-Key| AU[Auth middleware]
+    AU --> C[FastAPI Backend]
+    C --> D[(Firestore: roster, attendance, face vectors)]
+    D -->|loaded at startup| M
     C --> E[Face Recognition Service]
     E --> F[CLAHE Preprocessing]
     F --> G[RetinaFace Detection]
@@ -26,12 +28,13 @@ flowchart LR
     I --> K[512-D Embedding]
     J --> K
     K --> L[L2 Normalization]
-    L --> M[Backend-Specific FAISS Index]
+    L --> M[In-memory FAISS index per backend]
     M --> N{Confident?}
     N -->|yes| O[Present]
-    N -->|no| P[Gemini VLM Adjudication]
+    N -->|no| P[Adjudicator: re-crop, then Gemini shortlist]
     P --> O
-    P --> Q[Unsure]
+    P --> Q[Unsure - left for a human]
+    P --> R[Not enrolled]
 ```
 
 ## Frontend
@@ -59,10 +62,17 @@ students/<registration_number>
 attendance_logs/<YYYY-MM-DD>
   date
   timestamp
-  present_students[]
+  present_students[]        replaced on each scan, not appended
+
+face_embeddings/<backend>__<registration_number>
+  reg_number
+  backend                   "arcface" | "adaface"
+  dim                       512
+  vector[]                  the face, as numbers
+  updated_at
 ```
 
-Firebase stores metadata and attendance records. Face embeddings are stored locally in FAISS, not in Firestore.
+`present_students` is **replaced** by each scan rather than merged. An append-only list could never un-mark a student, so a single wrong "present" was permanent. The cost of replacing is that one document per calendar day means a second scan overwrites the first — correct for one class a day, and the first thing to change if that stops being true.
 
 ## Recognition backends
 
@@ -77,17 +87,16 @@ AdaFace uses RetinaFace for detection, corrected five-landmark alignment, the Ad
 The two models generate separate embeddings and therefore require separate FAISS indexes:
 
 ```text
-known_faces/
-├── <reg_number>.jpg
-├── arcface/
-│   ├── faiss.index
-│   └── id_map.json
-└── adaface/
-    ├── faiss.index
-    └── id_map.json
+known_faces/                      images only, no index files
+└── <reg_number>.jpg              shared by both backends
+
+Firestore
+└── face_embeddings/
+    ├── arcface__<reg_number>     { reg_number, backend, dim, vector[512] }
+    └── adaface__<reg_number>
 ```
 
-The raw registration image is shared, but the embeddings are backend-specific.
+The raw registration image is shared, but the vectors are backend-specific — ArcFace and AdaFace describe the same face in two languages that cannot be compared. Both sets live in the same collection, tagged by backend, and each is loaded into its own in-memory FAISS index at startup.
 
 ## Student registration flow
 
@@ -135,24 +144,41 @@ sequenceDiagram
     participant X as FAISS
     participant V as Gemini VLM
 
-    F->>A: POST /take_attendance
+    F->>A: POST /take_attendance_agentic (photo + X-API-Key)
     A->>DB: Read all students
+    A-->>F: job_id (returns in milliseconds)
+    Note over A: scan continues on a background thread
     A->>A: Apply CLAHE
     A->>D: Detect every face
     D-->>A: Face regions and landmarks
     A->>M: Generate embedding per face
     M-->>A: 512-D vectors
-    A->>X: Search best and second-best candidates
+    A->>X: Search top-k candidates
     X-->>A: Similarity scores
-    A->>A: Apply threshold and score-margin rules
-    A->>V: Escalate unsure faces (parallel)
-    V-->>A: YES / NO per face
-    A->>A: Promote YES to present
-    A->>DB: Log confident matches
-    A-->>F: Present, absent, unsure, processing
+    A->>A: Classify: confident / uncertain / unrecognized
+
+    loop each unsettled face, in parallel
+        A->>A: Assess size + sharpness
+        alt picture problem
+            A->>D: Re-crop from full resolution, re-detect, re-embed
+            D-->>A: Better vector - may settle it for free
+        end
+        opt still unsettled
+            A->>V: This face + a shortlist of students
+            V-->>A: which student / NONE / error
+        end
+    end
+
+    loop while running
+        F->>A: GET /attendance_job/{id}?since=N
+        A-->>F: reasoning events since N
+    end
+
+    A->>DB: Replace today's present list
+    A-->>F: present, absent, unsure, unknown_faces, evidence
 ```
 
-Where `V` is the Gemini VLM described below.
+`V` is Gemini, described below. Three things in this diagram are load-bearing: the job id comes back before the work starts, so a slow scan can never trip a client timeout; the cheap local re-crop is tried before anything is paid for; and Gemini can answer **NONE**, which is how an unenrolled person in the room gets reported rather than pinned on whoever scored highest.
 
 Each detected face is embedded, L2-normalized, and compared with FAISS using inner product, which is cosine similarity for normalized vectors.
 

@@ -29,3 +29,12 @@ Thumbs.db
 *.log
 backend/pretrained/.cache/
 .claude/scheduled_tasks.lock
+
+# Flutter web build output (deployed to Firebase Hosting, not committed)
+frontend/build/
+
+# Firebase CLI local state
+.firebase/
+
+# Claude Code local settings
+.claude/
