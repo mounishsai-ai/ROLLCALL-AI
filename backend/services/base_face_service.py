@@ -1,10 +1,21 @@
 """
-Base face service providing shared FAISS vector database, background registration
-queue, status tracking, and CLAHE preprocessing. Both ArcFace (DeepFace) and
-AdaFace backends extend this class.
+Base face service providing the shared FAISS vector search, background
+registration queue, status tracking, and CLAHE preprocessing. Both ArcFace
+(DeepFace) and AdaFace backends extend this class.
+
+**Where the vectors live.** Firestore, not the filesystem. FAISS is built in
+memory at startup from what Firestore holds, and every registration writes
+through to Firestore as well as into the in-memory index. Nothing is persisted
+to disk.
+
+That split is deliberate. A `faiss.index` file was fine on one laptop and
+became a liability the moment this ran on Cloud Run: container disks are
+discarded on restart, and a Cloud Storage mount is not a safe home for a file
+that gets opened, seeked and rewritten in place. Keeping the durable copy in a
+database and the searchable copy in memory means FAISS does the one thing it is
+excellent at and is never trusted with the one thing it is not.
 """
 
-import json
 import os
 import threading
 from abc import ABC, abstractmethod
@@ -21,7 +32,7 @@ class BaseFaceService(ABC):
     Subclasses only need to implement `_extract_embeddings()`.
 
     Provides:
-    - FAISS index management (per-backend subdirectory)
+    - In-memory FAISS search, rebuilt from Firestore at startup
     - Background registration queue (ThreadPoolExecutor, single worker)
     - Thread-safe registration status tracking
     - CLAHE image preprocessing
@@ -37,28 +48,33 @@ class BaseFaceService(ABC):
         backend_name: str,
         match_threshold: float,
         unsure_threshold: float,
+        db=None,
     ):
         self.known_faces_dir = known_faces_dir
         self.backend_name = backend_name
         self.match_threshold = match_threshold
         self.unsure_threshold = unsure_threshold
+        # The durable home for this backend's vectors. Required: without it
+        # every registration would be forgotten on the next restart, silently,
+        # which is worse than refusing to start.
+        if db is None:
+            raise ValueError(
+                "A FirebaseDBService is required — face embeddings are stored in Firestore."
+            )
+        self.db = db
         # A close runner-up is an ambiguous identity, even if the best score
         # clears the absolute threshold. Keep this configurable so it can be
         # calibrated from real classroom validation data.
         self.match_margin = float(os.getenv("FACE_MATCH_MARGIN", "0.05"))
 
-        # Images are shared across backends; FAISS index is per-backend
+        # Registration images are shared across backends; vectors are not.
         os.makedirs(known_faces_dir, exist_ok=True)
-        index_dir = os.path.join(known_faces_dir, backend_name)
-        os.makedirs(index_dir, exist_ok=True)
 
-        self.faiss_index_path = os.path.join(index_dir, "faiss.index")
-        self.id_map_path = os.path.join(index_dir, "id_map.json")
-
-        # Load or create the FAISS index
+        # The searchable copy. Rebuilt from Firestore, never written to disk.
         self._id_map: dict[int, str] = {}  # Maps FAISS integer ID -> reg_number
         self._next_id: int = 0
-        self._index = self._load_or_create_index()
+        self._index_lock = threading.Lock()
+        self._index = self._build_index_from_db()
 
         self._executor = ThreadPoolExecutor(max_workers=1)
         self._registration_status: dict[str, dict] = {}
@@ -70,7 +86,7 @@ class BaseFaceService(ABC):
         print(
             f"[OK] {backend_name.upper()} Service ready. "
             f"Faces dir: {known_faces_dir}/ | "
-            f"Index dir: {index_dir}/ | "
+            f"Vectors: Firestore ({backend_name}) -> in-memory FAISS | "
             f"Index size: {self._index.ntotal} | "
             f"Match threshold: {self.match_threshold:.2f} | "
             f"Unsure threshold: {self.unsure_threshold:.2f} | "
@@ -103,46 +119,76 @@ class BaseFaceService(ABC):
     #  FAISS Index Management
     # ──────────────────────────────────────────────
 
-    def _load_or_create_index(self) -> faiss.IndexIDMap:
-        """Load existing FAISS index from disk, or create a new one."""
+    def _empty_index(self) -> faiss.IndexIDMap:
         # Inner Product on L2-normalized vectors == Cosine Similarity
-        flat_index = faiss.IndexFlatIP(self.EMBEDDING_DIM)
-        index = faiss.IndexIDMap(flat_index)
+        return faiss.IndexIDMap(faiss.IndexFlatIP(self.EMBEDDING_DIM))
 
-        if os.path.exists(self.faiss_index_path) and os.path.exists(self.id_map_path):
-            try:
-                index = faiss.read_index(self.faiss_index_path)
-                with open(self.id_map_path, "r") as f:
-                    raw_map = json.load(f)
-                self._id_map = {int(k): v for k, v in raw_map.items()}
-                self._next_id = max(self._id_map.keys()) + 1 if self._id_map else 0
-                print(f"[OK] Loaded FAISS index with {index.ntotal} vectors.")
-            except Exception as e:
-                print(f"[WARN] Failed to load FAISS index, creating new: {e}")
-                flat_index = faiss.IndexFlatIP(self.EMBEDDING_DIM)
-                index = faiss.IndexIDMap(flat_index)
-                self._id_map = {}
-                self._next_id = 0
-
-        return index
-
-    def _save_index(self):
-        """Persist the FAISS index and ID mapping to disk."""
-        faiss.write_index(self._index, self.faiss_index_path)
-        with open(self.id_map_path, "w") as f:
-            json.dump(self._id_map, f)
-
-    def reset_index(self):
-        """Replace this backend's index with an empty, persistent index.
-
-        This is deliberately separate from normal sync: an index rebuild is
-        required after changing preprocessing or alignment, whereas normal
-        sync only fills missing identities.
+    def _build_index_from_db(self) -> faiss.IndexIDMap:
         """
-        self._index = faiss.IndexIDMap(faiss.IndexFlatIP(self.EMBEDDING_DIM))
+        Rebuild the searchable index from the vectors Firestore is holding.
+
+        This is the whole startup cost of the index: reading a few small
+        documents. It is not re-running the face model — the vectors already
+        exist, they are just being loaded into something that can search them.
+        A failure here leaves an empty index rather than stopping the server,
+        because a backend that answers "nobody is enrolled" is still
+        diagnosable, whereas one that refuses to start is not.
+        """
+        index = self._empty_index()
         self._id_map = {}
         self._next_id = 0
-        self._save_index()
+
+        try:
+            stored = self.db.get_embeddings(self.backend_name)
+        except Exception as e:
+            print(f"[WARN] Could not load {self.backend_name} embeddings from Firestore: {e}")
+            return index
+
+        vectors, ids = [], []
+        for entry in stored:
+            vec = np.asarray(entry["vector"], dtype=np.float32)
+            if vec.size != self.EMBEDDING_DIM:
+                print(
+                    f"[WARN] Skipping {entry['reg_number']}: expected "
+                    f"{self.EMBEDDING_DIM} dimensions, found {vec.size}."
+                )
+                continue
+            faiss_id = self._next_id
+            self._next_id += 1
+            self._id_map[faiss_id] = entry["reg_number"]
+            vectors.append(vec)
+            ids.append(faiss_id)
+
+        if vectors:
+            matrix = np.vstack(vectors).astype(np.float32)
+            # Stored vectors were normalized before saving, but normalizing
+            # again is free and makes the index correct even if something ever
+            # writes a raw vector.
+            faiss.normalize_L2(matrix)
+            index.add_with_ids(matrix, np.array(ids, dtype=np.int64))
+
+        print(f"[OK] Built {self.backend_name} index from Firestore with {index.ntotal} vector(s).")
+        return index
+
+    def reload_index(self):
+        """Re-read every vector from Firestore, discarding the in-memory copy."""
+        with self._index_lock:
+            self._index = self._build_index_from_db()
+
+    def reset_index(self):
+        """
+        Throw away every vector this backend has, in memory and in Firestore.
+
+        Deliberately separate from normal sync: a rebuild is required after
+        changing preprocessing or alignment, whereas sync only fills in
+        identities that are missing.
+        """
+        deleted = self.db.delete_backend_embeddings(self.backend_name)
+        with self._index_lock:
+            self._index = self._empty_index()
+            self._id_map = {}
+            self._next_id = 0
+        print(f"[OK] Cleared {deleted} stored {self.backend_name} vector(s).")
 
     @staticmethod
     def _normalize(embedding: np.ndarray) -> np.ndarray:
@@ -199,12 +245,18 @@ class BaseFaceService(ABC):
         reg_number: str,
         image_bytes: bytes,
         cleanup_image_on_failure: bool = True,
+        save_image: bool = True,
     ) -> bool:
         """
         Registers a student's face:
         1. Saves the original image synchronously (for display in the app).
         2. Queues embedding extraction in a background thread (non-blocking).
         Returns immediately so the user can register the next student.
+
+        `save_image=False` is for the *second* backend when one photo is being
+        registered into both: the photograph is shared, so writing it twice is
+        pointless, and the two backends racing to write the same path is worse
+        than pointless.
         """
         img_path = os.path.join(self.known_faces_dir, f"{reg_number}.jpg")
         nparr = np.frombuffer(image_bytes, np.uint8)
@@ -214,7 +266,7 @@ class BaseFaceService(ABC):
             raise ValueError("Could not decode image. Please try a different photo.")
 
         # Save a high-quality copy for display in the app
-        if not cv2.imwrite(img_path, img, [cv2.IMWRITE_JPEG_QUALITY, 95]):
+        if save_image and not cv2.imwrite(img_path, img, [cv2.IMWRITE_JPEG_QUALITY, 95]):
             raise ValueError("Could not save face image. Check write permissions.")
 
         # Mark as processing and queue the heavy embedding work
@@ -268,17 +320,20 @@ class BaseFaceService(ABC):
             vec = self._normalize(embedding)
 
             # Remove old entry if re-registering the same student
-            self._remove_from_index(reg_number)
+            # Firestore first. If the durable write fails the registration has
+            # not happened, and adding it to the in-memory index anyway would
+            # make a student who vanishes on the next restart look enrolled.
+            self.db.save_embedding(self.backend_name, reg_number, vec.reshape(-1).tolist())
 
-            # Add to FAISS
-            faiss_id = self._next_id
-            self._next_id += 1
-            self._index.add_with_ids(vec, np.array([faiss_id], dtype=np.int64))
-            self._id_map[faiss_id] = reg_number
-            self._save_index()
+            with self._index_lock:
+                self._remove_from_memory_index(reg_number)
+                faiss_id = self._next_id
+                self._next_id += 1
+                self._index.add_with_ids(vec, np.array([faiss_id], dtype=np.int64))
+                self._id_map[faiss_id] = reg_number
 
             self._set_status(reg_number, "completed")
-            print(f"[OK] Registered {reg_number} in FAISS (id={faiss_id}, dim={vec.shape[1]})")
+            print(f"[OK] Registered {reg_number} ({self.backend_name}, id={faiss_id}, dim={vec.shape[1]})")
 
         except Exception as e:
             self._set_status(reg_number, "failed", str(e))
@@ -296,16 +351,35 @@ class BaseFaceService(ABC):
     #  Deletion
     # ──────────────────────────────────────────────
 
-    def _remove_from_index(self, reg_number: str):
-        """Remove all FAISS entries for a given reg_number."""
+    def _remove_from_memory_index(self, reg_number: str):
+        """Drop a student from the searchable copy. Caller holds `_index_lock`."""
         ids_to_remove = [fid for fid, rn in self._id_map.items() if rn == reg_number]
         if ids_to_remove:
             self._index.remove_ids(np.array(ids_to_remove, dtype=np.int64))
             for fid in ids_to_remove:
                 del self._id_map[fid]
 
+    def forget(self, reg_number: str):
+        """
+        Drop a student from this backend's in-memory index only.
+
+        Used when another backend has already done the durable deletion — the
+        photograph and every stored vector are gone, and this service just
+        needs to stop returning somebody who no longer exists.
+        """
+        with self._index_lock:
+            self._remove_from_memory_index(reg_number)
+        with self._status_lock:
+            self._registration_status.pop(reg_number, None)
+
     def delete_face(self, reg_number: str) -> bool:
-        """Deletes a student's face image and removes their embedding from FAISS."""
+        """
+        Remove a student's photo and their stored vectors.
+
+        Vectors are deleted for **every** backend, not just the active one.
+        Deleting someone should not leave them recognisable after a backend
+        switch — that is how a "deleted" student comes back from the dead.
+        """
         img_path = os.path.join(self.known_faces_dir, f"{reg_number}.jpg")
         if os.path.exists(img_path):
             os.remove(img_path)
@@ -313,14 +387,15 @@ class BaseFaceService(ABC):
         else:
             print(f"[WARN] No face image found for {reg_number}")
 
-        self._remove_from_index(reg_number)
-        self._save_index()
+        self.db.delete_all_embeddings_for_student(reg_number)
+        with self._index_lock:
+            self._remove_from_memory_index(reg_number)
 
         # Clean up registration status
         with self._status_lock:
             self._registration_status.pop(reg_number, None)
 
-        print(f"[OK] Removed {reg_number} from FAISS index.")
+        print(f"[OK] Removed {reg_number} from every stored index.")
         return True
 
     # ──────────────────────────────────────────────
@@ -394,8 +469,13 @@ class BaseFaceService(ABC):
         duplicating the scoring or candidate-filtering rules.
         """
         query_vec = self._normalize(embedding)
-        k = min(self.CANDIDATE_K + 1, self._index.ntotal)
-        scores, ids = self._index.search(query_vec, k=k)
+        # A registration can land mid-scan, and FAISS does not tolerate a write
+        # arriving while a search is in flight. The lock is held only for the
+        # search itself, which is microseconds against 12 vectors.
+        with self._index_lock:
+            k = min(self.CANDIDATE_K + 1, self._index.ntotal)
+            scores, ids = self._index.search(query_vec, k=k)
+            id_map = dict(self._id_map)
 
         best_score = float(scores[0][0])  # Cosine similarity (0 to 1)
         best_id = int(ids[0][0])
@@ -416,7 +496,7 @@ class BaseFaceService(ABC):
             cand_id = int(ids[0][rank])
             if cand_id == -1:
                 continue
-            cand_reg = self._id_map.get(cand_id)
+            cand_reg = id_map.get(cand_id)
             if cand_reg is None or cand_reg in seen or cand_reg not in reg_to_name:
                 continue
             seen.add(cand_reg)
@@ -428,7 +508,7 @@ class BaseFaceService(ABC):
                 }
             )
 
-        top_reg = self._id_map.get(best_id) if best_id != -1 else None
+        top_reg = id_map.get(best_id) if best_id != -1 else None
         skip_reason = None
         if best_id == -1:
             skip_reason = "no_neighbour"

@@ -314,6 +314,12 @@ class AttendanceAdjudicator:
             "reg_number": record["top_reg"],
             "reason": "",
             "tools_used": [],
+            # Carried all the way into the result so the teacher's review screen
+            # can show the actual pixels a verdict was reached on, next to the
+            # student's registration photo. A name with no picture beside it is
+            # something a teacher can only take on trust.
+            "thumb": self._thumb(natural_crop),
+            "score": round(float(record["best_score"]), 4),
         }
 
         quality = self._assess_quality(natural_crop, record["facial_area"], record["detector_confidence"])
@@ -383,6 +389,7 @@ class AttendanceAdjudicator:
                 )
 
                 if new_tier == "confident" and rescan["skip_reason"] is None:
+                    outcome["score"] = round(float(rescan["best_score"]), 4)
                     outcome.update(
                         outcome="present",
                         reg_number=rescan["top_reg"],
@@ -604,6 +611,13 @@ class AttendanceAdjudicator:
                 "resolved_by": "vector_match",
                 "reason": f"Matched at {record['best_score']:.0%} similarity, clear of the runner-up.",
                 "face_id": record["face_id"],
+                # Every matched student gets the crop they were matched on, not
+                # just the ones that needed investigating. The review screen
+                # shows this beside their registration photo, and "the majority
+                # that matched instantly" is exactly the set a teacher is being
+                # asked to take on trust.
+                "thumb": self._thumb(record["crop"]),
+                "score": round(float(record["best_score"]), 4),
             }
 
         self._emit(
@@ -679,14 +693,26 @@ class AttendanceAdjudicator:
                                 "reason": result["reason"],
                                 "face_id": result["face_id"],
                                 "corrected": result.get("corrected", False),
+                                "thumb": result.get("thumb"),
+                                "score": result.get("score"),
                             }
                         elif result["outcome"] == "stranger":
-                            strangers.append({"face_id": result["face_id"], "reason": result["reason"]})
+                            strangers.append({
+                                "face_id": result["face_id"],
+                                "reason": result["reason"],
+                                "thumb": result.get("thumb"),
+                            })
                         elif reg and reg not in recognized:
                             unsure.add(reg)
                             evidence.setdefault(
                                 reg,
-                                {"resolved_by": "unresolved", "reason": result["reason"], "face_id": result["face_id"]},
+                                {
+                                    "resolved_by": "unresolved",
+                                    "reason": result["reason"],
+                                    "face_id": result["face_id"],
+                                    "thumb": result.get("thumb"),
+                                    "score": result.get("score"),
+                                },
                             )
             except Exception as exc:
                 processing["status"] = "partial"

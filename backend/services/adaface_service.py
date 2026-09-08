@@ -52,6 +52,7 @@ class AdaFaceService(BaseFaceService):
         match_threshold: float = 0.40,
         unsure_threshold: float = 0.35,
         match_margin: float = 0.05,
+        db=None,
     ):
         # Load AdaFace model
         model_path = os.getenv(
@@ -87,6 +88,7 @@ class AdaFaceService(BaseFaceService):
             backend_name="adaface",
             match_threshold=match_threshold,
             unsure_threshold=unsure_threshold,
+            db=db,
         )
 
     # ──────────────────────────────────────────────

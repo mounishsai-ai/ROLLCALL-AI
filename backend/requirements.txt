@@ -3,9 +3,14 @@ uvicorn==0.29.0
 python-multipart==0.0.9
 firebase-admin>=6.5.0
 deepface==0.0.93
-opencv-python==4.9.0.80
+# 4.9 is compiled against the NumPy 1.x ABI. With NumPy 2 installed it fails
+# at import with "numpy.core.multiarray failed to import" — which is exactly
+# what broke the first Cloud Run build, while the laptop was fine on 4.13.
+# Keep this at or above 4.10 so the container matches the machine it was
+# developed on.
+opencv-python>=4.10
 tf-keras
-numpy
+numpy>=2.0
 faiss-cpu
 pydantic==2.6.4
 python-dotenv==1.0.1

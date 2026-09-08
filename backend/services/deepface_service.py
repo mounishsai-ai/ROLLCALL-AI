@@ -28,6 +28,7 @@ class DeepFaceService(BaseFaceService):
         match_threshold: float = 0.40,
         unsure_threshold: float = 0.35,
         match_margin: float = 0.05,
+        db=None,
     ):
         match_threshold = float(os.getenv("DEEPFACE_MATCH_THRESHOLD", str(match_threshold)))
         unsure_threshold = float(os.getenv("DEEPFACE_UNSURE_THRESHOLD", str(unsure_threshold)))
@@ -37,6 +38,7 @@ class DeepFaceService(BaseFaceService):
             backend_name="arcface",
             match_threshold=match_threshold,
             unsure_threshold=unsure_threshold,
+            db=db,
         )
 
     # ──────────────────────────────────────────────

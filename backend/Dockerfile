@@ -11,6 +11,14 @@ ENV KMP_DUPLICATE_LIB_OK=TRUE \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/app/pretrained/.cache
 
+# PyTorch's default PyPI wheel bundles CUDA — roughly 2.5GB of GPU drivers for
+# a container that has no GPU. Installing the CPU build first means the line
+# below finds torch already satisfied and skips it. This is the difference
+# between a ~1GB image and a ~4GB one, and it comes straight off cold-start time.
+RUN pip install --no-cache-dir \
+    --index-url https://download.pytorch.org/whl/cpu \
+    torch torchvision
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
