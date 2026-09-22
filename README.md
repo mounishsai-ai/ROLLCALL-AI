@@ -2,7 +2,10 @@
 
 **One photograph. Every face accounted for.**
 
-**Live: https://ai-face-detector-daaad.web.app** — opens in any browser, nothing to install. Ask the maintainer for the access key.
+**Demo video:** _(link to be added)_ — a single group photo turned into a signed attendance register. To run the app yourself, see [Running it locally](#running-it-locally).
+<!-- Replace "(link to be added)" above with your video URL, e.g. [Watch the demo](https://youtu.be/your-id) -->
+<!-- The hosted demo (Cloud Run + Firebase Hosting) ran on time-limited free credits and is not permanent. -->
+
 
 Classroom attendance from a single group photo — and a live view of the system reasoning about the faces it can't settle on the first try.
 
