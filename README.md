@@ -2,14 +2,47 @@
 
 **One photograph. Every face accounted for.**
 
-**Demo video:** _(link to be added)_ — a single group photo turned into a signed attendance register. To run the app yourself, see [Running it locally](#running-it-locally).
-<!-- Replace "(link to be added)" above with your video URL, e.g. [Watch the demo](https://youtu.be/your-id) -->
-<!-- The hosted demo (Cloud Run + Firebase Hosting) ran on time-limited free credits and is not permanent. -->
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Flutter](https://img.shields.io/badge/Flutter-app-02569B?logo=flutter&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
+![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
 
+Classroom attendance from a single group photo — with a live view of the system
+reasoning about the faces it can't settle on the first try.
 
-Classroom attendance from a single group photo — and a live view of the system reasoning about the faces it can't settle on the first try.
+Most face-recognition attendance tools stop at "unknown." RollCall-AI doesn't: a
+face the model isn't confident about gets **investigated** — re-cropped,
+re-embedded, or escalated to a vision-language model for a second opinion — and
+every verdict ships with the reasoning behind it, so a teacher can audit the
+decision instead of just trusting it.
 
-Most face-recognition attendance tools stop at "unknown." RollCall-AI doesn't: a face the model isn't confident about gets investigated — re-cropped, re-embedded, or escalated to a vision-language model for a second opinion — and every final verdict ships with the reasoning behind it, so a teacher can audit the decision instead of just trusting it.
+## Demo
+
+https://github.com/user-attachments/assets/70181054-f3c7-4ec0-8044-fc96c913900d
+
+> The demo uses publicly available photos of **well-known actors as stand-in
+> students**. Real faces are biometric data, so keeping them out of a public
+> video is a deliberate privacy choice — the same principle the app applies to
+> real deployments (see [Before you run this on real people](#before-you-run-this-on-real-people)).
+> To run the app yourself, see [Running it locally](#running-it-locally).
+
+## What makes it more than a face-matcher
+
+- **It investigates instead of guessing.** The faces a model can't settle — the
+  small, blurry, half-turned ones at the back of any classroom — go through an
+  *Adjudicator* loop that picks a tool per face: a free re-crop first, and a
+  vision-language model (Gemini) only if that fails.
+- **It is allowed to say "none of these."** An open room contains people who
+  aren't on the roster. The system reports a stranger rather than pinning them on
+  whoever happened to score highest.
+- **A failed check is never a wrong answer.** A network error or timeout is a
+  third state, not a silent "that isn't them" — so a glitch never marks a present
+  student absent.
+- **It flags its own decay.** When a student's stored photo only just matches, the
+  register says *time for a new photo* — catching the slow drift as people grow
+  beards or change glasses, before it quietly breaks their attendance.
+- **A scan proposes; a person signs.** Nothing is recorded until a teacher
+  confirms it, and that rule is enforced in the API, not just the interface.
 
 ## How it works
 
