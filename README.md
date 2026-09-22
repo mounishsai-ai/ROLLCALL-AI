@@ -2,7 +2,7 @@
 
 **One photograph. Every face accounted for.**
 
-**Live: https://ai-face-detector-daaad.web.app** — opens in any browser, nothing to install. Ask the team for the access key.
+**Live: https://ai-face-detector-daaad.web.app** — opens in any browser, nothing to install. Ask the maintainer for the access key.
 
 Classroom attendance from a single group photo — and a live view of the system reasoning about the faces it can't settle on the first try.
 
@@ -98,6 +98,24 @@ is responsible for what happens next:
 
 Nothing here should be used to track attendance without the knowledge of the
 people being tracked.
+
+## Third-party components
+
+The source code in this repository is MIT-licensed (see [LICENSE](LICENSE)). It
+builds on open-source components, each under its own license, among them:
+
+- **RetinaFace** (face detection) and **ArcFace** via **DeepFace** (embeddings)
+- **AdaFace IR-50** (embeddings, PyTorch)
+- **FAISS** (vector search)
+- **Flutter** (app) and **FastAPI** (backend)
+- **Google Gemini** via **Vertex AI** (optional second opinion)
+
+The MIT license here covers this project's own code only. The pretrained
+face-recognition **model weights** (ArcFace, AdaFace) are trained on third-party
+datasets and commonly carry **research / non-commercial-only** terms. They are
+not redistributed in this repository, and this project's license grants no right
+to use them. **Check each model's and dataset's own license before any
+commercial use.**
 
 ## Author
 

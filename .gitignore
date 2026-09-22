@@ -38,3 +38,8 @@ frontend/build/
 
 # Claude Code local settings
 .claude/
+
+# Personal / private (never published)
+CLAUDE.md
+AGENTS.md
+notes/
